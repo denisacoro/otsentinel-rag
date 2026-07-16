@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual environment
+.venv/
+venv/
+
+# Environment variables and secrets
+.env
+.env.local
+*.key
+*.pem
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Local data
+data/raw/*
+data/processed/*
+data/evaluation/generated/*
+
+# Keep directory structure
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Models and adapters
+models/
+checkpoints/
+outputs/
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# MLflow
+mlruns/
+mlartifacts/
+
+# Qdrant local storage
+qdrant_storage/
+
+# Logs
+logs/
+*.log
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Docker overrides
+docker-compose.override.yml
+
+*.egg-info/
