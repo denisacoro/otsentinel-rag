@@ -1,4 +1,6 @@
 from app.schemas.document import (
+    ChunkingSummary,
+    DocumentChunk,
     ExtractedLine,
     ParsedPage,
     PdfParseSummary,
@@ -8,6 +10,8 @@ from app.schemas.document import (
 from app.schemas.source import DownloadResult, SourceRecord
 
 __all__ = [
+    "ChunkingSummary",
+    "DocumentChunk",
     "DownloadResult",
     "ExtractedLine",
     "ParsedPage",
