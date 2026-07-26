@@ -10,12 +10,7 @@ from pydantic import ValidationError
 
 from app.schemas.source import DownloadResult, SourceRecord
 
-DEFAULT_HEADERS = {
-    "User-Agent": (
-        "OTSentinel-AI/0.1 "
-        "(educational AI engineering project)"
-    )
-}
+DEFAULT_HEADERS = {"User-Agent": ("OTSentinel-AI/0.1 (educational AI engineering project)")}
 
 
 def calculate_sha256(file_path: Path) -> str:
@@ -34,9 +29,7 @@ def load_manifest(manifest_path: Path) -> list[SourceRecord]:
     """Load and validate source records from a JSONL manifest."""
 
     if not manifest_path.exists():
-        raise FileNotFoundError(
-            f"Source manifest does not exist: {manifest_path}"
-        )
+        raise FileNotFoundError(f"Source manifest does not exist: {manifest_path}")
 
     sources: list[SourceRecord] = []
 
@@ -85,9 +78,7 @@ def download_source(
             checked_at_utc=datetime.now(UTC),
         )
 
-    temporary_destination = destination.with_suffix(
-        destination.suffix + ".part"
-    )
+    temporary_destination = destination.with_suffix(destination.suffix + ".part")
 
     try:
         with httpx.stream(
@@ -159,11 +150,7 @@ def download_manifest_sources(
 
         results.append(result)
 
-        print(
-            f"  Status: {result.status}\n"
-            f"  File: {result.local_path}\n"
-            f"  SHA-256: {result.sha256}"
-        )
+        print(f"  Status: {result.status}\n  File: {result.local_path}\n  SHA-256: {result.sha256}")
 
     save_download_report(results, report_path)
 

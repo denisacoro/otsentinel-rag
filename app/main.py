@@ -3,8 +3,7 @@ from fastapi import FastAPI
 app = FastAPI(
     title="OTSentinel AI",
     description=(
-        "Multilingual RAG and fine-tuned LLM platform for "
-        "CPS, SCADA and Industrial IoT security."
+        "Multilingual RAG and fine-tuned LLM platform for CPS, SCADA and Industrial IoT security."
     ),
     version="0.1.0",
 )

@@ -5,28 +5,15 @@ from app.ingestion.downloader import download_manifest_sources
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-DEFAULT_MANIFEST = (
-    PROJECT_ROOT
-    / "data"
-    / "manifests"
-    / "sources.jsonl"
-)
+DEFAULT_MANIFEST = PROJECT_ROOT / "data" / "manifests" / "sources.jsonl"
 
 DEFAULT_RAW_DIRECTORY = PROJECT_ROOT / "data" / "raw"
 
-DEFAULT_REPORT = (
-    PROJECT_ROOT
-    / "data"
-    / "processed"
-    / "download_reports"
-    / "latest.jsonl"
-)
+DEFAULT_REPORT = PROJECT_ROOT / "data" / "processed" / "download_reports" / "latest.jsonl"
 
 
 def parse_arguments() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Download authoritative OTSentinel AI sources."
-    )
+    parser = argparse.ArgumentParser(description="Download authoritative OTSentinel AI sources.")
 
     parser.add_argument(
         "--force",
