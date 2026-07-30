@@ -23,6 +23,12 @@ class Settings(BaseSettings):
         ge=1,
     )
 
+    ollama_base_url: str = "http://localhost:11434"
+    generator_model_name: str = "llama3.2:3b"
+    generation_temperature: float = 0.0
+    min_retrieval_score: float = Field(default=0.35, ge=0.0, le=1.0)
+
+
 
 @lru_cache
 def get_settings() -> Settings:
