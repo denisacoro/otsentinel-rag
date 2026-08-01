@@ -9,38 +9,29 @@ from qdrant_client import QdrantClient, models
 from app.schemas.document import DocumentChunk
 
 DENSE_VECTOR_NAME = "dense"
+SPARSE_VECTOR_NAME = "sparse"
 
 
-def create_qdrant_client(
-    qdrant_url: str,
-) -> QdrantClient:
+def create_qdrant_client(qdrant_url: str) -> QdrantClient:
     """Create a Qdrant server client."""
 
-    return QdrantClient(
-        url=qdrant_url,
-        timeout=60,
-    )
+    return QdrantClient(url=qdrant_url, timeout=60)
 
 
 def chunk_point_id(chunk_id: str) -> str:
     """Create a stable Qdrant UUID from a chunk ID."""
 
-    return str(
-        uuid5(
-            NAMESPACE_URL,
-            f"otsentinel-ai:{chunk_id}",
-        )
-    )
+    return str(uuid5(NAMESPACE_URL, f"otsentinel-ai:{chunk_id}"))
 
 
-def ensure_dense_collection(
+def ensure_hybrid_collection(
     *,
     client: QdrantClient,
     collection_name: str,
-    vector_size: int,
+    dense_vector_size: int,
     recreate: bool = False,
 ) -> None:
-    """Create the dense-vector collection when necessary."""
+    """Create the dense + sparse hybrid collection when necessary."""
 
     collection_exists = client.collection_exists(collection_name=collection_name)
 
@@ -56,13 +47,22 @@ def ensure_dense_collection(
         collection_name=collection_name,
         vectors_config={
             DENSE_VECTOR_NAME: models.VectorParams(
-                size=vector_size,
+                size=dense_vector_size,
                 distance=models.Distance.COSINE,
+            )
+        },
+        sparse_vectors_config={
+            SPARSE_VECTOR_NAME: models.SparseVectorParams(
+                modifier=models.Modifier.IDF,
             )
         },
     )
 
-    print(f"Created Qdrant collection: {collection_name}\nDense vector size: {vector_size}")
+    print(
+        f"Created Qdrant collection: {collection_name}\n"
+        f"Dense vector size: {dense_vector_size}\n"
+        "Sparse vector: BM25 with IDF modifier"
+    )
 
 
 def create_payload_indexes(
@@ -132,44 +132,35 @@ def create_chunk_payload(
     }
 
 
-def upsert_dense_chunks(
+def upsert_hybrid_chunks(
     *,
     client: QdrantClient,
     collection_name: str,
     chunks: Sequence[DocumentChunk],
-    vectors: Sequence[Sequence[float]],
+    dense_vectors: Sequence[Sequence[float]],
+    sparse_vectors: Sequence[models.SparseVector],
     source_metadata: dict[str, Any],
 ) -> None:
-    """Insert or replace one batch of embedded chunks."""
+    """Insert or replace one batch of chunks with both dense and sparse vectors."""
 
-    if len(chunks) != len(vectors):
-        raise ValueError("The chunk count must equal the vector count.")
+    if not (len(chunks) == len(dense_vectors) == len(sparse_vectors)):
+        raise ValueError("chunk, dense vector and sparse vector counts must match.")
 
     points: list[models.PointStruct] = []
 
-    for chunk, vector in zip(
-        chunks,
-        vectors,
-        strict=True,
-    ):
+    for chunk, dense_vector, sparse_vector in zip(chunks, dense_vectors, sparse_vectors, strict=True):
         points.append(
             models.PointStruct(
                 id=chunk_point_id(chunk.chunk_id),
                 vector={
-                    DENSE_VECTOR_NAME: list(vector),
+                    DENSE_VECTOR_NAME: list(dense_vector),
+                    SPARSE_VECTOR_NAME: sparse_vector,
                 },
-                payload=create_chunk_payload(
-                    chunk=chunk,
-                    source_metadata=source_metadata,
-                ),
+                payload=create_chunk_payload(chunk=chunk, source_metadata=source_metadata),
             )
         )
 
-    client.upsert(
-        collection_name=collection_name,
-        points=points,
-        wait=True,
-    )
+    client.upsert(collection_name=collection_name, points=points, wait=True)
 
 
 def build_search_filter(
@@ -177,24 +168,18 @@ def build_search_filter(
     config_name: str | None = None,
     source_id: str | None = None,
 ) -> models.Filter | None:
-    """Build optional metadata filters for dense retrieval."""
+    """Build optional metadata filters for retrieval."""
 
     conditions: list[models.FieldCondition] = []
 
     if config_name is not None:
         conditions.append(
-            models.FieldCondition(
-                key="config_name",
-                match=models.MatchValue(value=config_name),
-            )
+            models.FieldCondition(key="config_name", match=models.MatchValue(value=config_name))
         )
 
     if source_id is not None:
         conditions.append(
-            models.FieldCondition(
-                key="source_id",
-                match=models.MatchValue(value=source_id),
-            )
+            models.FieldCondition(key="source_id", match=models.MatchValue(value=source_id))
         )
 
     if not conditions:
@@ -212,21 +197,61 @@ def search_dense_chunks(
     config_name: str | None = None,
     source_id: str | None = None,
 ) -> list[models.ScoredPoint]:
-    """Search indexed chunks by dense-vector similarity."""
+    """Search indexed chunks by dense-vector similarity only."""
 
     if top_k <= 0:
         raise ValueError("top_k must be greater than zero.")
 
-    query_filter = build_search_filter(
-        config_name=config_name,
-        source_id=source_id,
-    )
+    query_filter = build_search_filter(config_name=config_name, source_id=source_id)
 
     response = client.query_points(
         collection_name=collection_name,
         query=list(query_vector),
         using=DENSE_VECTOR_NAME,
         query_filter=query_filter,
+        limit=top_k,
+        with_payload=True,
+        with_vectors=False,
+    )
+
+    return response.points
+
+
+def search_hybrid_chunks(
+    *,
+    client: QdrantClient,
+    collection_name: str,
+    dense_query_vector: Sequence[float],
+    sparse_query_vector: models.SparseVector,
+    top_k: int,
+    prefetch_limit: int = 25,
+    config_name: str | None = None,
+    source_id: str | None = None,
+) -> list[models.ScoredPoint]:
+    """Search using dense + sparse retrieval fused with Reciprocal Rank Fusion."""
+
+    if top_k <= 0:
+        raise ValueError("top_k must be greater than zero.")
+
+    query_filter = build_search_filter(config_name=config_name, source_id=source_id)
+
+    response = client.query_points(
+        collection_name=collection_name,
+        prefetch=[
+            models.Prefetch(
+                query=list(dense_query_vector),
+                using=DENSE_VECTOR_NAME,
+                filter=query_filter,
+                limit=prefetch_limit,
+            ),
+            models.Prefetch(
+                query=sparse_query_vector,
+                using=SPARSE_VECTOR_NAME,
+                filter=query_filter,
+                limit=prefetch_limit,
+            ),
+        ],
+        query=models.FusionQuery(fusion=models.Fusion.RRF),
         limit=top_k,
         with_payload=True,
         with_vectors=False,

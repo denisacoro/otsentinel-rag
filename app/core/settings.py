@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     generator_model_name: str = "llama3.2:3b"
     generation_temperature: float = 0.0
     min_retrieval_score: float = Field(default=0.35, ge=0.0, le=1.0)
+    mlflow_tracking_uri: str = "http://localhost:5000"
+    mlflow_experiment_name: str = "otsentinel-retrieval"
 
 
 

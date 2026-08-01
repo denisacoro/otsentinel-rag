@@ -21,7 +21,9 @@ dependencies = [
     "sentencepiece>=0.2",
     "numpy>=1.26,<3",
     "sentence-transformers>=5.6,<6",
-    "qdrant-client>=1.18,<2"
+    "qdrant-client>=1.18,<2",
+    "mlflow>=2.19,<3",
+    "fastembed>=0.4",
 ]
 
 [project.optional-dependencies]
