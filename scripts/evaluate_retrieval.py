@@ -15,6 +15,7 @@ from app.evaluation.retrieval_metrics import (
     reciprocal_rank,
 )
 from app.retrieval.embedder import DenseEmbedder
+from app.retrieval.reranker import CrossEncoderReranker
 from app.retrieval.sparse_embedder import SparseEmbedder
 from app.retrieval.vector_store import (
     create_qdrant_client,
@@ -27,6 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATASET_PATH = PROJECT_ROOT / "data" / "eval" / "golden_eval_v1.jsonl"
 
 METRIC_NAMES = ["recall_at_5", "recall_at_10", "precision_at_5", "mrr", "ndcg_at_10"]
+SEARCH_MODES = ["dense", "hybrid", "hybrid_rerank"]
 
 
 def load_eval_questions(path: Path) -> list[EvalQuestion]:
@@ -55,11 +57,15 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--config-name", default="section-bge-m3-512-64")
     parser.add_argument("--max-k", type=int, default=10)
     parser.add_argument("--run-name", default="dense-baseline")
-    parser.add_argument("--search-mode", default="dense", choices=["dense", "hybrid"])
+    parser.add_argument("--search-mode", default="dense", choices=SEARCH_MODES)
     parser.add_argument(
         "--prefetch-limit", type=int, default=25, help="Hybrid mode: candidates per branch before fusion."
     )
     parser.add_argument("--sparse-model-name", default="Qdrant/bm25")
+    parser.add_argument("--rerank-model-name", default="BAAI/bge-reranker-v2-m3")
+    parser.add_argument(
+        "--rerank-candidates", type=int, default=25, help="Candidates pulled from hybrid search before reranking."
+    )
 
     return parser.parse_args()
 
@@ -87,8 +93,13 @@ def main() -> None:
     )
 
     sparse_embedder = None
-    if arguments.search_mode == "hybrid":
+    reranker = None
+
+    if arguments.search_mode in ("hybrid", "hybrid_rerank"):
         sparse_embedder = SparseEmbedder(model_name=arguments.sparse_model_name)
+
+    if arguments.search_mode == "hybrid_rerank":
+        reranker = CrossEncoderReranker(model_name=arguments.rerank_model_name)
 
     client = create_qdrant_client(settings.qdrant_url)
 
@@ -100,10 +111,14 @@ def main() -> None:
         mlflow.log_param("config_name", arguments.config_name)
         mlflow.log_param("embedding_model", settings.embedding_model_name)
 
-        if arguments.search_mode == "hybrid":
+        if arguments.search_mode in ("hybrid", "hybrid_rerank"):
             mlflow.log_param("sparse_model", arguments.sparse_model_name)
             mlflow.log_param("prefetch_limit", arguments.prefetch_limit)
             mlflow.log_param("fusion", "RRF")
+
+        if arguments.search_mode == "hybrid_rerank":
+            mlflow.log_param("rerank_model", arguments.rerank_model_name)
+            mlflow.log_param("rerank_candidates", arguments.rerank_candidates)
 
         mlflow.log_param("split", arguments.split)
         mlflow.log_param("max_k", arguments.max_k)
@@ -118,21 +133,7 @@ def main() -> None:
 
             start = time.perf_counter()
 
-            if arguments.search_mode == "hybrid":
-                dense_vector = dense_embedder.encode_query(question.question)
-                sparse_vector = sparse_embedder.encode_query(question.question)
-
-                results = search_hybrid_chunks(
-                    client=client,
-                    collection_name=settings.qdrant_collection,
-                    dense_query_vector=dense_vector,
-                    sparse_query_vector=sparse_vector,
-                    top_k=arguments.max_k,
-                    prefetch_limit=arguments.prefetch_limit,
-                    config_name=arguments.config_name,
-                    source_id=source_id,
-                )
-            else:
+            if arguments.search_mode == "dense":
                 query_vector = dense_embedder.encode_query(question.question)
 
                 results = search_dense_chunks(
@@ -143,9 +144,38 @@ def main() -> None:
                     config_name=arguments.config_name,
                     source_id=source_id,
                 )
+                retrieved_ids = [str((r.payload or {}).get("chunk_id")) for r in results]
+
+            else:
+                dense_vector = dense_embedder.encode_query(question.question)
+                sparse_vector = sparse_embedder.encode_query(question.question)
+
+                candidate_limit = (
+                    arguments.rerank_candidates if arguments.search_mode == "hybrid_rerank" else arguments.max_k
+                )
+
+                results = search_hybrid_chunks(
+                    client=client,
+                    collection_name=settings.qdrant_collection,
+                    dense_query_vector=dense_vector,
+                    sparse_query_vector=sparse_vector,
+                    top_k=candidate_limit,
+                    prefetch_limit=arguments.prefetch_limit,
+                    config_name=arguments.config_name,
+                    source_id=source_id,
+                )
+
+                if arguments.search_mode == "hybrid_rerank":
+                    candidates = [
+                        (str((r.payload or {}).get("chunk_id")), str((r.payload or {}).get("text", "")))
+                        for r in results
+                    ]
+                    reranked = reranker.rerank(question.question, candidates)
+                    retrieved_ids = [chunk_id for chunk_id, _ in reranked[: arguments.max_k]]
+                else:
+                    retrieved_ids = [str((r.payload or {}).get("chunk_id")) for r in results]
 
             latency_ms = (time.perf_counter() - start) * 1000
-            retrieved_ids = [str((r.payload or {}).get("chunk_id")) for r in results]
 
             row = {
                 "question_id": question.question_id,

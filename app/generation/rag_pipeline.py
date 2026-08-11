@@ -7,11 +7,10 @@ from app.core.settings import get_settings
 from app.generation.llm_client import OllamaClient
 from app.generation.prompts import REFUSAL_TEXT, build_messages
 from app.retrieval.embedder import DenseEmbedder
-from app.retrieval.vector_store import create_qdrant_client, search_dense_chunks
+from app.retrieval.sparse_embedder import SparseEmbedder
+from app.retrieval.vector_store import create_qdrant_client, search_hybrid_chunks
 from app.schemas.answer import RagAnswer, RetrievedChunkRef
 from app.schemas.document import DocumentChunk
-
-
 
 CITATION_TAG_PATTERN = re.compile(r"\[S(\d+)\]")
 
@@ -68,25 +67,30 @@ def answer_question(
     top_k: int = 5,
     config_name: str = "section-bge-m3-512-64",
 ) -> RagAnswer:
-    """Run the baseline dense-retrieval RAG pipeline for one question."""
+    """Run the hybrid (dense + sparse, RRF-fused) RAG pipeline for one question."""
 
     settings = get_settings()
     total_start = datetime.now(UTC)
 
-    embedder = DenseEmbedder(
+    dense_embedder = DenseEmbedder(
         model_name=settings.embedding_model_name,
         requested_device=settings.embedding_device,
     )
-    query_vector = embedder.encode_query(question)
+    sparse_embedder = SparseEmbedder()
+
+    dense_query_vector = dense_embedder.encode_query(question)
+    sparse_query_vector = sparse_embedder.encode_query(question)
 
     client = create_qdrant_client(settings.qdrant_url)
 
     retrieval_start = datetime.now(UTC)
-    results = search_dense_chunks(
+    results = search_hybrid_chunks(
         client=client,
         collection_name=settings.qdrant_collection,
-        query_vector=query_vector,
+        dense_query_vector=dense_query_vector,
+        sparse_query_vector=sparse_query_vector,
         top_k=top_k,
+        prefetch_limit=settings.hybrid_prefetch_limit,
         config_name=config_name,
         source_id=source_id,
     )
