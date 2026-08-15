@@ -64,3 +64,6 @@ docker-compose.override.yml
 
 # Python build metadata
 *.egg-info/
+
+unsloth_compiled_cache/
+outputs/qlora_v1_checkpoints/
