@@ -66,10 +66,12 @@ def answer_question(
     language: str = "en",
     top_k: int = 5,
     config_name: str = "section-bge-m3-512-64",
+    generator: object | None = None,
 ) -> RagAnswer:
     """Run the hybrid (dense + sparse, RRF-fused) RAG pipeline for one question."""
 
     settings = get_settings()
+    generator_label = getattr(generator, "model_name", None) or settings.generator_model_name
     total_start = datetime.now(UTC)
 
     dense_embedder = DenseEmbedder(
@@ -117,7 +119,7 @@ def answer_question(
             language=language,
             source_id=source_id,
             config_name=config_name,
-            model_name=settings.generator_model_name,
+            model_name=generator_label,
             top_k=top_k,
             retrieved_chunks=retrieved_refs,
             answer_text=REFUSAL_TEXT,
@@ -132,7 +134,7 @@ def answer_question(
     chunks = [_payload_to_chunk(r.payload or {}) for r in results]
     messages, tag_to_chunk_id = build_messages(question=question, language=language, chunks=chunks)
 
-    llm = OllamaClient(
+    llm = generator if generator is not None else OllamaClient(
         base_url=settings.ollama_base_url,
         model_name=settings.generator_model_name,
         temperature=settings.generation_temperature,
@@ -150,7 +152,7 @@ def answer_question(
         language=language,
         source_id=source_id,
         config_name=config_name,
-        model_name=settings.generator_model_name,
+        model_name=generator_label,
         top_k=top_k,
         retrieved_chunks=retrieved_refs,
         answer_text=answer_text,
