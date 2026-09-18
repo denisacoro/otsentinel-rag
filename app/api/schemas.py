@@ -26,3 +26,17 @@ class HealthResponse(BaseModel):
     qdrant_ok: bool
     ollama_ok: bool
     embedding_model_loaded: bool
+
+
+class UploadResponse(BaseModel):
+    source_id: str = Field(
+        ..., description="Pass this back as source_id on /ask to query only this document."
+    )
+    title: str
+    num_sections: int
+    num_chunks: int
+    total_pages: int
+
+
+class DeleteResponse(BaseModel):
+    deleted_source_id: str
