@@ -67,23 +67,35 @@ def answer_question(
     top_k: int = 5,
     config_name: str = "section-bge-m3-512-64",
     generator: object | None = None,
+    dense_embedder: DenseEmbedder | None = None,
+    sparse_embedder: SparseEmbedder | None = None,
+    qdrant_client: object | None = None,
 ) -> RagAnswer:
-    """Run the hybrid (dense + sparse, RRF-fused) RAG pipeline for one question."""
+    """Run the hybrid (dense + sparse, RRF-fused) RAG pipeline for one question.
+
+    dense_embedder / sparse_embedder / qdrant_client can be injected by a
+    long-lived caller (the FastAPI service) so the embedding model and Qdrant
+    connection are created once and reused across requests, instead of being
+    rebuilt on every call. CLI scripts that don't pass them keep the original
+    behavior unchanged -- a fresh embedder and client are constructed per call.
+    """
 
     settings = get_settings()
     generator_label = getattr(generator, "model_name", None) or settings.generator_model_name
     total_start = datetime.now(UTC)
 
-    dense_embedder = DenseEmbedder(
-        model_name=settings.embedding_model_name,
-        requested_device=settings.embedding_device,
-    )
-    sparse_embedder = SparseEmbedder()
+    if dense_embedder is None:
+        dense_embedder = DenseEmbedder(
+            model_name=settings.embedding_model_name,
+            requested_device=settings.embedding_device,
+        )
+    if sparse_embedder is None:
+        sparse_embedder = SparseEmbedder()
 
     dense_query_vector = dense_embedder.encode_query(question)
     sparse_query_vector = sparse_embedder.encode_query(question)
 
-    client = create_qdrant_client(settings.qdrant_url)
+    client = qdrant_client if qdrant_client is not None else create_qdrant_client(settings.qdrant_url)
 
     retrieval_start = datetime.now(UTC)
     results = search_hybrid_chunks(
